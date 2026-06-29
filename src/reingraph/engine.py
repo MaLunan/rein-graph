@@ -68,6 +68,28 @@ def _compute_next_frontier(compiled: Any, gs: GraphSession, sources: list[str]) 
     return nf
 
 
+async def _run_node_with_policy(
+    node: Any, state_values: dict[str, Any], config: GraphConfig
+) -> Any:
+    """跑一个节点,带超时 + 自动重试。
+
+    中断(审批)正常返回 NodeResult、不抛;真异常(含超时)重试 node_max_retries 次,
+    耗尽后抛出 —— 由 superstep 的 gather(return_exceptions=True) 捕获 → 转「错误中断」。
+    """
+    last_exc: BaseException | None = None
+    for _ in range(config.node_max_retries + 1):
+        try:
+            if config.node_timeout_s is not None:
+                return await asyncio.wait_for(
+                    node.ainvoke(state_values), timeout=config.node_timeout_s
+                )
+            return await node.ainvoke(state_values)
+        except Exception as exc:  # 含 TimeoutError;重试
+            last_exc = exc
+    assert last_exc is not None
+    raise last_exc
+
+
 async def superstep(
     gs: GraphSession, compiled: Any
 ) -> tuple[GraphSession, list[GraphStep], GraphInterrupt | None]:
@@ -79,7 +101,10 @@ async def superstep(
         return gs, [], None
 
     results = await asyncio.gather(
-        *[compiled.nodes[n].ainvoke(gs.state.values) for n in frontier],
+        *[
+            _run_node_with_policy(compiled.nodes[n], gs.state.values, compiled.config)
+            for n in frontier
+        ],
         return_exceptions=True,  # 节点抛异常不炸整图,作为结果返回(进度保留)
     )
 
@@ -221,7 +246,7 @@ async def aresume_graph(
     saved: Any
     try:
         if is_error:
-            res = await node.ainvoke(gs.state.values)
+            res = await _run_node_with_policy(node, gs.state.values, compiled.config)
         elif node_name in gs.sub_sessions:
             res = await node.aresume(gs.sub_sessions[node_name], approve=approve, answer=answer)
         else:

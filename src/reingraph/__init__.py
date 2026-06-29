@@ -21,7 +21,7 @@ reinGraph 新增的只有「图拓扑」这一维。
     print(app.invoke({"input": "写一首诗"}).values["output"])
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 from reingraph.config import GraphConfig
 from reingraph.edges import END, START

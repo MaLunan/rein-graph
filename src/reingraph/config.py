@@ -22,3 +22,10 @@ class GraphConfig(BaseModel):
 
     max_total_tokens: int | None = None
     """④ 成本闸:各节点 token 用量累加的上限。None 表示不限。"""
+
+    node_timeout_s: float | None = None
+    """单个节点的执行超时(秒)。超时算作节点异常 → 触发重试 / 错误中断。None 表示不限。"""
+
+    node_max_retries: int = 0
+    """节点异常(含超时)的自动重试次数。瞬时错误(网络抖动 / 限流)自动恢复;
+    重试耗尽才转「错误中断」惊动人。默认 0(不自动重试)。中断(审批)不算异常、不重试。"""

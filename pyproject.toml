@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "rein-graph"
-version = "0.1.0"
+version = "0.2.0"
 description = "图编排框架:把多个 rein agent 编排成有状态的图工作流(条件分支/循环/并行/HITL),内核复用 rein"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -13,7 +13,7 @@ license-files = ["LICENSE"]
 authors = [{ name = "Rein Authors" }]
 keywords = ["agent", "llm", "graph", "orchestration", "workflow", "langgraph", "rein", "agentic"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",

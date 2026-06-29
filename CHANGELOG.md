@@ -4,10 +4,18 @@
 
 ## [Unreleased]
 
-### Added
-- **图级结构化日志**:`reingraph.log`(`enable_logging`,默认安静 NullHandler、一行开启,顺带开底层 rein 日志);engine 在熔断/中断/完成处埋点,带 `thread_id` 作 trace、脱敏不记 state/prompt。
+## [0.2.0] - 2026-06
+
+### Added(生产加固)
+- **节点异常处理**:节点抛异常 → 转「错误中断」(`gather(return_exceptions=True)`,不炸整图、同超步成功节点进度保留),`resume(approve=True)` 重试该节点 / `approve=False` 放弃,错误态可序列化。
+- **节点级超时 + 自动重试**:`GraphConfig` 加 `node_timeout_s` / `node_max_retries`;瞬时错误(网络抖动 / 限流 / 超时)自动重试,耗尽才转错误中断。
+- **图级结构化日志**:`reingraph.log`(`enable_logging`,默认安静 NullHandler、一行开启,顺带开底层 rein 日志);engine 在熔断 / 中断 / 完成处埋点,带 `thread_id` 作 trace、脱敏不记 state/prompt。
 - **CI badge** 加到 README。
-- **节点异常处理(生产加固)**:节点抛异常 → 转「错误中断」(`gather(return_exceptions=True)`,不炸整图、同超步成功节点进度保留),`resume(approve=True)` 重试该节点 / `approve=False` 放弃,错误态可序列化存盘。
+
+### Changed
+- 成熟度 `Development Status` 由 `3 - Alpha` 升至 **`4 - Beta`**。
+
+## [0.1.0] - 2026-06
 
 ### Added(G0–G7 全部完成)
 - **G0 状态与节点骨架**:`GraphState` + channel/reducer(名字注册表 → 可序列化)、`GraphConfig` 熔断四道闸、`GraphInterrupt`/`GraphStep`(复用 rein)、`Node` 协议 + `AgentNode`(中断冒泡)/`FunctionNode`。
