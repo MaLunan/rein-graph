@@ -4,6 +4,9 @@
 
 ## [Unreleased]
 
+### Added
+- **节点异常处理(生产加固)**:节点抛异常 → 转「错误中断」(`gather(return_exceptions=True)`,不炸整图、同超步成功节点进度保留),`resume(approve=True)` 重试该节点 / `approve=False` 放弃,错误态可序列化存盘。
+
 ### Added(G0–G7 全部完成)
 - **G0 状态与节点骨架**:`GraphState` + channel/reducer(名字注册表 → 可序列化)、`GraphConfig` 熔断四道闸、`GraphInterrupt`/`GraphStep`(复用 rein)、`Node` 协议 + `AgentNode`(中断冒泡)/`FunctionNode`。
 - **G1 顺序引擎**:`StateGraph` 构建器(混合 API)+ 无状态 `superstep` + `GraphSession` 快照 + `CompiledGraph`。

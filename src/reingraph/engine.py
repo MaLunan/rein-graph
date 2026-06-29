@@ -14,6 +14,8 @@ import asyncio
 import time
 from typing import Any
 
+from rein import Interrupt
+
 from reingraph.config import GraphConfig
 from reingraph.edges import END
 from reingraph.result import GraphInterrupt, GraphStep
@@ -75,12 +77,19 @@ async def superstep(
         gs.stop_reason = gs.stop_reason or "done"
         return gs, [], None
 
-    results = await asyncio.gather(*[compiled.nodes[n].ainvoke(gs.state.values) for n in frontier])
+    results = await asyncio.gather(
+        *[compiled.nodes[n].ainvoke(gs.state.values) for n in frontier],
+        return_exceptions=True,  # 节点抛异常不炸整图,作为结果返回(进度保留)
+    )
 
     steps: list[GraphStep] = []
     interrupted: list[tuple[str, Any]] = []
+    errored: list[tuple[str, BaseException]] = []
     for name, res in zip(frontier, results, strict=True):
         gs.loop_counts[name] = gs.loop_counts.get(name, 0) + 1
+        if isinstance(res, BaseException):
+            errored.append((name, res))
+            continue
         gs.usage = gs.usage + res.usage
         steps.append(
             GraphStep(
@@ -94,14 +103,24 @@ async def superstep(
         if res.interrupt is not None:
             interrupted.append((name, res))
 
-    # 合并所有成功节点(中断时也保留同超步成功节点的进度,顺序固定 → 可复现)
+    # 合并所有成功节点(异常/中断时也保留同超步成功节点的进度,顺序固定 → 可复现)
     for name, res in zip(frontier, results, strict=True):
-        if res.interrupt is not None:
+        if isinstance(res, BaseException) or res.interrupt is not None:
             continue
         gs.state = apply_updates(gs.state, res.updates)
         gs.completed.append(name)
 
-    # 有中断 → 存断点,整图暂停(frontier 设为待恢复的中断节点)
+    # 节点异常 → 转成「错误中断」(复用 rein 的 error 中断态),整图暂停存盘,resume 可重试/放弃
+    if errored:
+        first_name, exc = errored[0]
+        gs.pending_interrupt = GraphInterrupt(
+            node=first_name,
+            inner=Interrupt(type="error", message=f"{type(exc).__name__}: {exc}"),
+        )
+        gs.frontier = [n for n, _ in errored]
+        return gs, steps, gs.pending_interrupt
+
+    # 有 agent / 子图中断 → 存断点,整图暂停(frontier 设为待恢复的中断节点)
     if interrupted:
         for name, res in interrupted:
             if res.sub_session is not None:
@@ -174,16 +193,41 @@ async def aresume_graph(
 
     node_name = gs.pending_interrupt.node
     node = compiled.nodes[node_name]
-    # 分流取出可恢复状态:子图节点喂子图快照,agent 节点喂 rein.Session
+    is_error = gs.pending_interrupt.inner.type == "error"
+
+    # 错误中断 + 放弃:停止并标记(不重试)
+    if is_error and not approve:
+        gs.done = True
+        gs.stop_reason = "node_error_abandoned"
+        gs.pending_interrupt = None
+        return GraphResult(
+            status="done",
+            values=gs.state.values,
+            session=gs,
+            steps=[],
+            usage=gs.usage,
+            stop_reason="node_error_abandoned",
+        )
+
+    # 重新执行该节点:错误中断 → 重试 ainvoke;agent / 子图中断 → aresume(分流)
     saved: Any
-    if node_name in gs.sub_sessions:
-        saved = gs.sub_sessions[node_name]
-    else:
-        saved = gs.node_sessions.get(node_name)
-    res = await node.aresume(saved, approve=approve, answer=answer)  # ← 复用 rein / 子图 aresume
+    try:
+        if is_error:
+            res = await node.ainvoke(gs.state.values)
+        elif node_name in gs.sub_sessions:
+            res = await node.aresume(gs.sub_sessions[node_name], approve=approve, answer=answer)
+        else:
+            saved = gs.node_sessions.get(node_name)
+            res = await node.aresume(saved, approve=approve, answer=answer)
+    except Exception as exc:  # 重试又异常 → 再次错误中断
+        gs.pending_interrupt = GraphInterrupt(
+            node=node_name, inner=Interrupt(type="error", message=f"{type(exc).__name__}: {exc}")
+        )
+        return _interrupted_result(gs, [])
+
     gs.usage = gs.usage + res.usage
 
-    if res.interrupt is not None:  # 多轮审批:再次中断(子图 / agent 分流存)
+    if res.interrupt is not None:  # 再次中断(多轮审批 / 子图再中断,分流存)
         if res.sub_session is not None:
             gs.sub_sessions[node_name] = res.sub_session
         else:
