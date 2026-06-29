@@ -39,3 +39,26 @@
 - **`FunctionNode`** 包普通 async 函数做编排粘合(取数/转换,不涉及 LLM,永不中断)。
 
 > 这就坐实核心设计:**reinGraph 的节点内部完全是 rein,图层只管「节点之间」。**
+
+---
+
+## G1:顺序引擎闭环(让图跑起来)
+
+G1 把 G0 的"名词"连成能跑的图。5 个模块:
+
+### `edges.py` — 边
+`START`/`END` 两个哨兵 + 静态有向边。`add_edge(START, x)` 设入口,`add_edge(x, END)` 设出口。
+
+### `session.py` — 图执行快照(GraphSession)+ 结果(GraphResult)
+`GraphSession` 是一次图执行的全部状态:当前黑板、待跑的节点(frontier)、超步数、累计用量,以及**命门 `node_sessions`**(被中断 agent 的 rein.Session 整个嵌进来)。一句 `model_dump_json` 就能把整张图存盘。
+
+### `engine.py` — 无状态单步引擎(照抄 rein loop.py)
+`superstep` 推进一个超步:把 frontier 的节点用 `gather` 跑一遍,合并各自的更新,算出下一批要跑的节点。`arun_graph` 驱动这个循环,每步前查熔断四道闸。**引擎不存任何状态 —— 状态全在 GraphSession**,所以"暂停=存 session、恢复=喂回 session"(为 G4 留好形状)。frontier 按"全员并发"写,G3 的并行天然复用同一套。
+
+### `graph.py` — StateGraph 构建器(混合 API)
+LangGraph 熟悉的 `add_node/add_edge/set_entry_point` + rein 的 `@graph.node` 装饰器糖。`add_node` 智能适配:传 rein Agent 自动包成 AgentNode,传函数包成 FunctionNode。`compile()` 编译期校验(没入口 / 边端点不存在就立即报错)。
+
+### `compiled.py` — CompiledGraph(可执行图)
+`invoke`(同步)/ `ainvoke`(异步)从入口跑到 END。同步门面照抄 rein:在事件循环里就报错引导用 `ainvoke`(不嵌套 event loop)。
+
+> **G1 成果**:`A→B→END` 流水线跑通,数据在节点间真流转,到 END 自动停,整图可序列化,熔断生效 —— reinGraph 现在能把 rein agent 编排成顺序工作流了。
