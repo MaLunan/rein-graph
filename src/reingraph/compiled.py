@@ -108,3 +108,9 @@ class CompiledGraph:
             yield ev
         if self.store is not None:
             self.store.save(thread_id, gs)
+
+    def to_mermaid(self) -> str:
+        """把图拓扑导出成 mermaid 文本(零依赖),粘到 GitHub / 文档站即可看图。"""
+        from reingraph.viz import to_mermaid
+
+        return to_mermaid(self)
