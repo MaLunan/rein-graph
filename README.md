@@ -25,9 +25,24 @@ pip install rein-graph        # 装完即带 rein-agent
 import reingraph
 ```
 
+## 示例
+
+`examples/` 全部用 MockProvider,离线零成本可跑(`python examples/<name>.py`):
+
+| 示例 | 演示 |
+|---|---|
+| [sequential.py](examples/sequential.py) | 顺序流水线(A → B → END) |
+| [fanout.py](examples/fanout.py) | 并行扇出 + 汇合 |
+| [control_flow.py](examples/control_flow.py) | 条件路由 + reflexion 循环 |
+| [hitl.py](examples/hitl.py) | 图级人工审批(HITL) |
+| [checkpoint.py](examples/checkpoint.py) | 存盘 → 换进程 load → 批准恢复 |
+| [error_handling.py](examples/error_handling.py) | 节点异常处理 + 自动重试 |
+| [streaming.py](examples/streaming.py) | astream 事件流 |
+| [subgraph.py](examples/subgraph.py) | 子图(图作节点) |
+
 ## 状态
 
-**G0–G7 全部完成 ✅**:顺序 / 条件 / 循环 / 并行扇出汇合 / 图级 HITL(可恢复)/ 流式 / 子图嵌套 / 可视化。CI 全套绿(ruff + mypy + pytest,Python 3.11–3.13)。
+**0.2.0 Beta** —— G0–G7 全部完成(顺序 / 条件 / 循环 / 并行扇出汇合 / 图级 HITL / 流式 / 子图 / 可视化)+ 生产加固(节点异常处理 + 超时重试 + 图级结构化日志,节点失败三层防线:自动重试 → 错误中断 → 熔断)。CI 全套绿(ruff + mypy + pytest,Python 3.11–3.13)。
 
 ## 许可
 
