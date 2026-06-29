@@ -11,7 +11,7 @@ from typing import Any
 from rein import Agent
 
 from reingraph.edges import END, START
-from reingraph.nodes import AgentNode, FunctionNode, Node
+from reingraph.nodes import AgentNode, FunctionNode, Node, SubGraphNode
 
 
 class StateGraph:
@@ -26,14 +26,20 @@ class StateGraph:
 
     def add_node(self, name: str, node: Any) -> "StateGraph":
         """登记节点。智能适配:Agent→AgentNode、async 函数→FunctionNode、已是 Node→直接收。"""
+        from reingraph.compiled import CompiledGraph
+
         if isinstance(node, Agent):
             node = AgentNode(name, node)
+        elif isinstance(node, CompiledGraph):
+            node = SubGraphNode(name, node)  # 子图作节点
         elif hasattr(node, "ainvoke"):
             pass  # 已实现节点协议,直接收(鸭子类型)
         elif callable(node):
             node = FunctionNode(name, node)
         else:
-            raise TypeError(f"无法把 {type(node).__name__} 当作节点(需 Agent / async 函数 / Node)")
+            raise TypeError(
+                f"无法把 {type(node).__name__} 当作节点(需 Agent / async 函数 / 子图 / Node)"
+            )
         node.name = name
         self._nodes[name] = node
         return self

@@ -18,6 +18,8 @@ from typing import Any, Protocol, runtime_checkable
 from pydantic import BaseModel, Field
 from rein import Agent, Interrupt, RunResult, Session, Step, Usage
 
+from reingraph.session import GraphSession
+
 
 class NodeResult(BaseModel):
     """一个节点跑完一次的结果(可序列化)。"""
@@ -25,6 +27,7 @@ class NodeResult(BaseModel):
     updates: dict[str, Any] = Field(default_factory=dict)  # 写回 GraphState 的部分更新
     interrupt: Interrupt | None = None  # 复用 rein.Interrupt —— 图级中断的种子
     rein_session: Session | None = None  # AgentNode 中断时存的 rein.Session(resume 时喂回)
+    sub_session: GraphSession | None = None  # SubGraphNode 中断时存的子图快照(嵌套)
     usage: Usage = Field(default_factory=Usage)  # 复用 rein.Usage
     steps: list[Step] = Field(default_factory=list)  # 复用 rein.Step(可观测)
     summary: str = ""  # 简短摘要(给流水账)
@@ -120,3 +123,40 @@ class FunctionNode:
     ) -> NodeResult:
         # 函数节点不产生中断,理论上不会被 resume(防御性报错,而非静默)。
         raise NotImplementedError("FunctionNode 不产生中断,不应被 resume")
+
+
+class SubGraphNode:
+    """把一个编译好的图(CompiledGraph)当作节点 —— 子图复用。
+
+    子图内部 agent 中断时:把子图中断的内层 rein.Interrupt 冒泡到父节点(父图当普通中断处理),
+    并把【子图的 GraphSession 快照】放进 NodeResult.sub_session —— 父图存盘时连子图一起存(嵌套),
+    resume 时分发回子图(subgraph.aresume)。这就是「嵌套快照」复用。
+    """
+
+    def __init__(self, name: str, subgraph: Any, *, output_key: str | None = None, input_fn=None):
+        self.name = name
+        self.subgraph = subgraph  # CompiledGraph(鸭子,不 import 避免循环依赖)
+        self.output_key = output_key  # 子图最终 values 写到父 state 的哪个键;None=全部合并
+        self.input_fn = input_fn  # 父 state -> 子图 inputs(默认透传父 state)
+
+    def _from_subresult(self, result: Any) -> NodeResult:
+        if result.status == "interrupted":
+            return NodeResult(
+                interrupt=result.interrupt.inner,  # 子图中断的内层 rein.Interrupt 冒泡到父图
+                sub_session=result.session,  # 存子图快照(嵌套),resume 时喂回子图
+                usage=result.usage,
+                summary=f"[subgraph interrupted] {self.name}",
+            )
+        updates = {self.output_key: result.values} if self.output_key else dict(result.values)
+        return NodeResult(updates=updates, usage=result.usage, summary=f"subgraph:{self.name}")
+
+    async def ainvoke(self, state_values: dict[str, Any]) -> NodeResult:
+        inputs = self.input_fn(state_values) if self.input_fn else dict(state_values)
+        result = await self.subgraph.ainvoke(inputs)  # 跑子图
+        return self._from_subresult(result)
+
+    async def aresume(self, sub_session: Any, *, approve: bool, answer: str | None) -> NodeResult:
+        result = await self.subgraph.aresume(
+            sub_session, approve=approve, answer=answer
+        )  # 子图恢复
+        return self._from_subresult(result)

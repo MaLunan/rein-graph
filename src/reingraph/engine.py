@@ -104,7 +104,10 @@ async def superstep(
     # 有中断 → 存断点,整图暂停(frontier 设为待恢复的中断节点)
     if interrupted:
         for name, res in interrupted:
-            gs.node_sessions[name] = res.rein_session
+            if res.sub_session is not None:
+                gs.sub_sessions[name] = res.sub_session  # 子图节点:存子图快照(嵌套)
+            else:
+                gs.node_sessions[name] = res.rein_session  # agent 节点:存 rein.Session
         first_name, first_res = interrupted[0]
         gs.pending_interrupt = GraphInterrupt(node=first_name, inner=first_res.interrupt)
         gs.frontier = [n for n, _ in interrupted]
@@ -171,17 +174,26 @@ async def aresume_graph(
 
     node_name = gs.pending_interrupt.node
     node = compiled.nodes[node_name]
-    node_session = gs.node_sessions.get(node_name)
-    res = await node.aresume(node_session, approve=approve, answer=answer)  # ← 复用 rein aresume
+    # 分流取出可恢复状态:子图节点喂子图快照,agent 节点喂 rein.Session
+    saved: Any
+    if node_name in gs.sub_sessions:
+        saved = gs.sub_sessions[node_name]
+    else:
+        saved = gs.node_sessions.get(node_name)
+    res = await node.aresume(saved, approve=approve, answer=answer)  # ← 复用 rein / 子图 aresume
     gs.usage = gs.usage + res.usage
 
-    if res.interrupt is not None:  # 多轮审批:再次中断
-        gs.node_sessions[node_name] = res.rein_session
+    if res.interrupt is not None:  # 多轮审批:再次中断(子图 / agent 分流存)
+        if res.sub_session is not None:
+            gs.sub_sessions[node_name] = res.sub_session
+        else:
+            gs.node_sessions[node_name] = res.rein_session
         gs.pending_interrupt = GraphInterrupt(node=node_name, inner=res.interrupt)
         return _interrupted_result(gs, [])
 
     # 该节点恢复完成:清断点 + 写回 + 推进
     gs.node_sessions.pop(node_name, None)
+    gs.sub_sessions.pop(node_name, None)
     gs.pending_interrupt = None
     gs.state = apply_updates(gs.state, res.updates)
     gs.completed.append(node_name)

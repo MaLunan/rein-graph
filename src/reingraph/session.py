@@ -28,6 +28,9 @@ class GraphSession(BaseModel):
     completed: list[str] = Field(default_factory=list)  # 已完成节点(汇合屏障 / 可观测)
     superstep: int = 0  # 已推进的超步数(熔断第①闸)
     node_sessions: dict[str, Session] = Field(default_factory=dict)  # 命门:中断节点的 rein.Session
+    sub_sessions: dict[str, "GraphSession"] = Field(
+        default_factory=dict
+    )  # 子图节点中断时存的子图快照(嵌套)
     loop_counts: dict[str, int] = Field(default_factory=dict)  # 各节点进入次数(循环上限闸)
     usage: Usage = Field(default_factory=Usage)  # 图级累计用量(复用 rein.Usage 相加)
     pending_interrupt: GraphInterrupt | None = None  # 图级中断详情(谁中断了)

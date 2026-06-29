@@ -128,3 +128,17 @@ LangGraph 熟悉的 `add_node/add_edge/set_entry_point` + rein 的 `@graph.node`
 engine 每步就把节点 `usage` 累加进 `gs.usage`、把节点明细聚合成带归属的 `GraphStep` —— 所以 `GraphResult.usage` 就是**全图总用量**、`steps` 是带"哪个节点 / 哪个超步"标注的完整流水账。各节点 `RunResult` 的 `rein.Step` 还嵌在 `GraphStep.inner_steps` 里,要钻到哪个 agent 的哪一步都行。
 
 > **G5 成果**:图执行可实时流式观察、全图用量 / 轨迹可聚合追踪。
+
+---
+
+## G6:子图(图作节点 + 嵌套 HITL)
+
+把一个编译好的图当作另一个图的节点。
+
+### `SubGraphNode`(`nodes.py`)
+`add_node` 传一个 `CompiledGraph` → 自动包成 `SubGraphNode`。它 `ainvoke` = 跑子图,子图最终 `values` 写回父 state。
+
+### 嵌套中断(命门的命门)
+子图内某 agent 中断 → 子图返回 interrupted → SubGraphNode 把**子图中断的内层 rein.Interrupt 冒泡到父**、把**子图的 `GraphSession` 快照**放进 `NodeResult.sub_session`。父图 superstep 把它存进 `GraphSession.sub_sessions`(**自引用字段**,和 `node_sessions` 并列)。于是整个父快照(嵌着子图快照、子图快照里又嵌着 agent 的 rein.Session)**一句 `model_dump_json` 全存下来**;resume 时一层层分发回去:父 resume → 子图 aresume → agent aresume。
+
+> **G6 成果**:图可嵌套复用,嵌套 HITL 一路冒泡 + 一路分发恢复 —— 还是同一套"可序列化快照 + 喂回"心法,只是多了一层嵌套。
