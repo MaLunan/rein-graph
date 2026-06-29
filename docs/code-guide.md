@@ -99,3 +99,20 @@ LangGraph 熟悉的 `add_node/add_edge/set_entry_point` + rein 的 `@graph.node`
 同一个 CompiledGraph 并发跑 100 个独立请求**不串台**:CompiledGraph 只读(nodes/edges/preds),每次 ainvoke 新建独立 GraphSession —— 天然继承 rein 的"无状态蓝图"并发安全(同 rein 的 test_concurrency)。
 
 > **G3 成果**:map-reduce 式多 agent 并发协作。reinGraph 现在能扇出 / 汇合 / 并行。
+
+---
+
+## G4:图级 HITL(核心卖点 —— 复用 rein 的命门)
+
+让图能在某个 agent 节点"暂停等人审批",存盘后换进程也能恢复。
+
+### 中断冒泡(G0 已备)+ 进度保留(`engine.py`)
+某 AgentNode 因 `permission="ask"` 中断 → rein 的 `Interrupt` + `Session` 原样冒泡 → superstep 把它存进 `node_sessions`、整图暂停。同超步**已成功的兄弟节点照常合并**(进度不丢)。
+
+### 存盘(`store.py`)
+`GraphStore` 复用 rein `SessionStore` 的 save/load 形态,存的就是 `GraphSession.model_dump_json()` —— 里面**嵌着被中断 agent 的 rein.Session**。Memory/File 两个实现镜像 rein。
+
+### 恢复(`aresume_graph`)
+`graph.resume(thread_id 或 session, approve=)` → 找到中断节点 → 调它的 `agent.aresume(node_sessions[node])` —— **直接复用 rein 的恢复**。完成则推进图、再中断则多轮审批、拒绝则错误回填让 agent 自愈。
+
+> **G4 成果**:整图(含 agent 会话)一句话存盘、换进程 resume。这是 reinGraph 区别于 LangGraph 的根本 —— **HITL / checkpoint 没写一行新机制,全是把 rein 的单 agent 中断恢复"分发到图层"**。

@@ -64,3 +64,38 @@ class CompiledGraph:
         except RuntimeError:
             return asyncio.run(self.ainvoke(inputs, thread_id=thread_id))
         raise RuntimeError("已在事件循环中,请改用 await ainvoke(...)")
+
+    async def aresume(
+        self,
+        session_or_thread: "GraphSession | str",
+        *,
+        approve: bool = True,
+        answer: str | None = None,
+    ) -> GraphResult:
+        """从图级中断恢复。参数可传 GraphSession 对象,或 thread_id(从 store 读回)。"""
+        if isinstance(session_or_thread, str):
+            if self.store is None:
+                raise ValueError("传 thread_id 恢复需要在 compile(store=...) 配 store")
+            gs = self.store.load(session_or_thread)
+            if gs is None:
+                raise ValueError(f"找不到 thread_id={session_or_thread!r} 的快照")
+        else:
+            gs = session_or_thread
+        result = await engine.aresume_graph(gs, self, approve=approve, answer=answer)
+        if self.store is not None:
+            self.store.save(result.session.thread_id, result.session)
+        return result
+
+    def resume(
+        self,
+        session_or_thread: "GraphSession | str",
+        *,
+        approve: bool = True,
+        answer: str | None = None,
+    ) -> GraphResult:
+        """同步 resume 门面(在事件循环里则报错引导 aresume)。"""
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(self.aresume(session_or_thread, approve=approve, answer=answer))
+        raise RuntimeError("已在事件循环中,请改用 await aresume(...)")

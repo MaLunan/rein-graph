@@ -1,14 +1,13 @@
 """无状态单步引擎 —— 照抄 rein loop.py 的形态:引擎是一组纯函数,状态全在 GraphSession。
 
-  - superstep(gs, compiled):推进【一个超步】= 把当前 frontier 的所有节点并发跑一遍,
-    合并各自的状态更新,算出下一个 frontier。任一节点中断 → 整图暂停(存断点)。
+  - superstep(gs, compiled):推进【一个超步】= frontier 全员并发跑、合并更新、算下一 frontier。
+    任一节点中断 → 整图暂停(同超步已成功的节点照常合并,进度不丢)。
   - arun_graph(gs, compiled):驱动 superstep 循环,每步前 check_graph_circuit 熔断。
+  - aresume_graph(gs, compiled, approve, answer):从图级中断恢复 —— 对中断节点调
+    node.aresume(内部 agent.aresume,复用 rein),完成则推进图、再中断则多轮审批。
   - check_graph_circuit:图级四道闸纯函数(照抄 rein.circuit.check_circuit)。
 
-G1 的顺序图里 frontier 通常只有一个节点,但这里就按「frontier 全员并发」写,
-G3 的并行扇出/汇合天然复用同一套(只需再加汇合屏障),不必重写。
-
-注:engine 不 import CompiledGraph(避免循环),只鸭子式访问 compiled.nodes / .edges / .config。
+engine 不 import CompiledGraph(避免循环),只鸭子式访问 compiled.nodes/.edges/.preds/.conditional/.config。
 """
 
 import asyncio
@@ -40,10 +39,7 @@ def check_graph_circuit(gs: GraphSession, config: GraphConfig, start_time: float
 
 
 def _next_targets(compiled: Any, node: str, state_values: dict[str, Any]) -> list[str]:
-    """算一个节点的下游目标。
-    - 有条件边:调 routing_fn(state) 得目标(单个或列表),经 path_map 映射(G2);
-    - 否则:用静态边。
-    """
+    """算一个节点的下游目标:有条件边则调 routing_fn(经 path_map),否则用静态边。"""
     cond = compiled.conditional.get(node)
     if cond is not None:
         result = cond.routing_fn(state_values)
@@ -52,6 +48,21 @@ def _next_targets(compiled: Any, node: str, state_values: dict[str, Any]) -> lis
             targets = [cond.path_map.get(t, t) for t in targets]
         return targets
     return list(compiled.edges.get(node, []))
+
+
+def _compute_next_frontier(compiled: Any, gs: GraphSession, sources: list[str]) -> list[str]:
+    """从 sources 的出边算下一 frontier,带汇合屏障(静态前驱未全完成的目标先不进)。"""
+    completed_set = set(gs.completed)
+    nf: list[str] = []
+    for name in sources:
+        for t in _next_targets(compiled, name, gs.state.values):
+            if t == END or t in nf:
+                continue
+            preds = compiled.preds.get(t, set())
+            if preds and not preds.issubset(completed_set):
+                continue  # 汇合屏障:还有上游没完成,先等
+            nf.append(t)
+    return nf
 
 
 async def superstep(
@@ -64,11 +75,10 @@ async def superstep(
         gs.stop_reason = gs.stop_reason or "done"
         return gs, [], None
 
-    # frontier 全员并发跑(G1 顺序图通常单个;并发是 G3 并行的形状)
     results = await asyncio.gather(*[compiled.nodes[n].ainvoke(gs.state.values) for n in frontier])
 
     steps: list[GraphStep] = []
-    # 先扫一遍:记流水账 + 累加用量 + 计数;任一中断则整图暂停
+    interrupted: list[tuple[str, Any]] = []
     for name, res in zip(frontier, results, strict=True):
         gs.loop_counts[name] = gs.loop_counts.get(name, 0) + 1
         gs.usage = gs.usage + res.usage
@@ -82,33 +92,44 @@ async def superstep(
             )
         )
         if res.interrupt is not None:
-            gs.node_sessions[name] = res.rein_session  # 存断点(rein.Session)
-            gs.pending_interrupt = GraphInterrupt(node=name, inner=res.interrupt)
-            return gs, steps, gs.pending_interrupt  # 任一中断 → 整图暂停(frontier 不动)
+            interrupted.append((name, res))
 
-    # 全部成功 —— 分两段:先全合并/记完成,再算下一 frontier(汇合屏障才看得到本超步全部完成)
-    # 段1:按 frontier 顺序合并各节点 updates(顺序固定 → 可复现)+ 记完成
+    # 合并所有成功节点(中断时也保留同超步成功节点的进度,顺序固定 → 可复现)
     for name, res in zip(frontier, results, strict=True):
+        if res.interrupt is not None:
+            continue
         gs.state = apply_updates(gs.state, res.updates)
         gs.completed.append(name)
-    # 段2:算下一 frontier(带汇合屏障:静态前驱未全完成的目标先不进,等其余上游)
-    completed_set = set(gs.completed)
-    next_frontier: list[str] = []
-    for name in frontier:
-        for t in _next_targets(compiled, name, gs.state.values):
-            if t == END or t in next_frontier:
-                continue
-            preds = compiled.preds.get(t, set())
-            if preds and not preds.issubset(completed_set):
-                continue  # 汇合屏障:还有上游没完成,t 先等着
-            next_frontier.append(t)
 
-    gs.frontier = next_frontier
+    # 有中断 → 存断点,整图暂停(frontier 设为待恢复的中断节点)
+    if interrupted:
+        for name, res in interrupted:
+            gs.node_sessions[name] = res.rein_session
+        first_name, first_res = interrupted[0]
+        gs.pending_interrupt = GraphInterrupt(node=first_name, inner=first_res.interrupt)
+        gs.frontier = [n for n, _ in interrupted]
+        return gs, steps, gs.pending_interrupt
+
+    # 全成功:算下一 frontier(带汇合屏障)
+    gs.frontier = _compute_next_frontier(compiled, gs, frontier)
     gs.superstep += 1
     if not gs.frontier:
         gs.done = True
         gs.stop_reason = "done"
     return gs, steps, None
+
+
+def _interrupted_result(gs: GraphSession, steps: list[GraphStep]) -> GraphResult:
+    gs.stop_reason = "interrupted"
+    return GraphResult(
+        status="interrupted",
+        values=gs.state.values,
+        session=gs,
+        steps=steps,
+        usage=gs.usage,
+        stop_reason="interrupted",
+        interrupt=gs.pending_interrupt,
+    )
 
 
 async def arun_graph(gs: GraphSession, compiled: Any) -> GraphResult:
@@ -124,16 +145,7 @@ async def arun_graph(gs: GraphSession, compiled: Any) -> GraphResult:
         gs, steps, interrupt = await superstep(gs, compiled)
         all_steps.extend(steps)
         if interrupt is not None:
-            gs.stop_reason = "interrupted"
-            return GraphResult(
-                status="interrupted",
-                values=gs.state.values,
-                session=gs,
-                steps=all_steps,
-                usage=gs.usage,
-                stop_reason="interrupted",
-                interrupt=interrupt,
-            )
+            return _interrupted_result(gs, all_steps)
     return GraphResult(
         status="done",
         values=gs.state.values,
@@ -142,3 +154,42 @@ async def arun_graph(gs: GraphSession, compiled: Any) -> GraphResult:
         usage=gs.usage,
         stop_reason=gs.stop_reason,
     )
+
+
+async def aresume_graph(
+    gs: GraphSession, compiled: Any, *, approve: bool = True, answer: str | None = None
+) -> GraphResult:
+    """从图级中断恢复 —— 复用 rein 的 aresume,零新机制。
+
+    对当前 pending 的中断节点调 node.aresume(内部 agent.aresume):
+      - 再次中断(多轮审批)→ 更新断点,继续暂停;
+      - 完成 → 清断点、写回 state、推进图,继续 arun_graph(若 frontier 还有其他中断
+        节点,superstep 会重新 ainvoke 它们 → 重新中断等审批)。
+    """
+    if gs.pending_interrupt is None:
+        return await arun_graph(gs, compiled)  # 没有待恢复的中断,直接继续
+
+    node_name = gs.pending_interrupt.node
+    node = compiled.nodes[node_name]
+    node_session = gs.node_sessions.get(node_name)
+    res = await node.aresume(node_session, approve=approve, answer=answer)  # ← 复用 rein aresume
+    gs.usage = gs.usage + res.usage
+
+    if res.interrupt is not None:  # 多轮审批:再次中断
+        gs.node_sessions[node_name] = res.rein_session
+        gs.pending_interrupt = GraphInterrupt(node=node_name, inner=res.interrupt)
+        return _interrupted_result(gs, [])
+
+    # 该节点恢复完成:清断点 + 写回 + 推进
+    gs.node_sessions.pop(node_name, None)
+    gs.pending_interrupt = None
+    gs.state = apply_updates(gs.state, res.updates)
+    gs.completed.append(node_name)
+    gs.frontier = [n for n in gs.frontier if n != node_name]  # 从待恢复移除
+    for t in _compute_next_frontier(compiled, gs, [node_name]):  # 它的下游进 frontier
+        if t not in gs.frontier:
+            gs.frontier.append(t)
+    gs.superstep += 1
+    gs.done = False
+    gs.stop_reason = None
+    return await arun_graph(gs, compiled)  # 继续跑
