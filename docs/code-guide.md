@@ -79,3 +79,23 @@ LangGraph 熟悉的 `add_node/add_edge/set_entry_point` + rein 的 `@graph.node`
 `max_node_visits`(单节点访问上限)+ `max_supersteps`(总超步上限)双闸兜底 —— 熔断纯函数 G1 已备好,G2 直接生效。
 
 > **G2 成果**:图能条件分支、能带上限循环。配合 G1,reinGraph 已能表达"路由 + 反思"这类动态工作流。
+
+---
+
+## G3:并行扇出/汇合(map-reduce 式多 agent 协作)
+
+让一个节点扇出到多个 agent **并发**跑,再**汇合**结果。
+
+### 扇出
+一个节点多条出边(或 routing_fn 返回列表)→ 下游多节点进 frontier → 引擎本来就用 `asyncio.gather` 并发跑(G1 就备好的形状,这里零改动)。
+
+### 汇合屏障(`engine.py` + `compiled.py`)
+编译期算每个节点的**静态前驱集合** `preds`。引擎合并改两段:**先全部跑完/记 completed,再算下一 frontier** —— 一个节点只有当它的**所有静态前驱都 completed** 才进 frontier。这样不对称汇合(d 等 b 和 e,而 e 比 b 多一跳)时,d 不会提前抢跑、读到不完整状态。
+
+### 结果汇合
+多分支写**同一个 state 键**,用 G0 的 reducer(`append`/`merge_dict`)正确并起来 —— 这正是 channel/reducer 当初存在的理由。
+
+### 并发安全
+同一个 CompiledGraph 并发跑 100 个独立请求**不串台**:CompiledGraph 只读(nodes/edges/preds),每次 ainvoke 新建独立 GraphSession —— 天然继承 rein 的"无状态蓝图"并发安全(同 rein 的 test_concurrency)。
+
+> **G3 成果**:map-reduce 式多 agent 并发协作。reinGraph 现在能扇出 / 汇合 / 并行。

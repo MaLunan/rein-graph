@@ -86,14 +86,22 @@ async def superstep(
             gs.pending_interrupt = GraphInterrupt(node=name, inner=res.interrupt)
             return gs, steps, gs.pending_interrupt  # 任一中断 → 整图暂停(frontier 不动)
 
-    # 全部成功:按 frontier 顺序合并 updates(顺序固定 → 可复现),算下一 frontier
-    next_frontier: list[str] = []
+    # 全部成功 —— 分两段:先全合并/记完成,再算下一 frontier(汇合屏障才看得到本超步全部完成)
+    # 段1:按 frontier 顺序合并各节点 updates(顺序固定 → 可复现)+ 记完成
     for name, res in zip(frontier, results, strict=True):
         gs.state = apply_updates(gs.state, res.updates)
         gs.completed.append(name)
+    # 段2:算下一 frontier(带汇合屏障:静态前驱未全完成的目标先不进,等其余上游)
+    completed_set = set(gs.completed)
+    next_frontier: list[str] = []
+    for name in frontier:
         for t in _next_targets(compiled, name, gs.state.values):
-            if t != END and t not in next_frontier:
-                next_frontier.append(t)
+            if t == END or t in next_frontier:
+                continue
+            preds = compiled.preds.get(t, set())
+            if preds and not preds.issubset(completed_set):
+                continue  # 汇合屏障:还有上游没完成,t 先等着
+            next_frontier.append(t)
 
     gs.frontier = next_frontier
     gs.superstep += 1

@@ -36,6 +36,17 @@ class CompiledGraph:
         self.config = config
         self.store = store
         self.conditional = conditional or {}  # source -> ConditionalEdge(运行期,不序列化)
+        # 汇合屏障用:每个节点的静态前驱集合(排除 START 虚拟入口)。
+        # 一个节点只有当【所有】静态前驱都完成,才被放进 frontier —— 防不对称汇合提前跑。
+        from reingraph.edges import END, START
+
+        self.preds: dict[str, set[str]] = {}
+        for src, targets in edges.items():
+            if src == START:
+                continue
+            for t in targets:
+                if t != END:
+                    self.preds.setdefault(t, set()).add(src)
 
     async def ainvoke(self, inputs: dict[str, Any], *, thread_id: str = "default") -> GraphResult:
         """异步执行一张图:把 inputs 灌进初始状态,从 entry 起跑到 END。"""
