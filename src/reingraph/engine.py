@@ -39,8 +39,18 @@ def check_graph_circuit(gs: GraphSession, config: GraphConfig, start_time: float
     return None
 
 
-def _next_targets(compiled: Any, node: str) -> list[str]:
-    """算一个节点的下游目标。G1:静态边;G2 会在这里接入条件路由 routing_fn。"""
+def _next_targets(compiled: Any, node: str, state_values: dict[str, Any]) -> list[str]:
+    """算一个节点的下游目标。
+    - 有条件边:调 routing_fn(state) 得目标(单个或列表),经 path_map 映射(G2);
+    - 否则:用静态边。
+    """
+    cond = compiled.conditional.get(node)
+    if cond is not None:
+        result = cond.routing_fn(state_values)
+        targets = result if isinstance(result, list) else [result]
+        if cond.path_map:
+            targets = [cond.path_map.get(t, t) for t in targets]
+        return targets
     return list(compiled.edges.get(node, []))
 
 
@@ -81,7 +91,7 @@ async def superstep(
     for name, res in zip(frontier, results, strict=True):
         gs.state = apply_updates(gs.state, res.updates)
         gs.completed.append(name)
-        for t in _next_targets(compiled, name):
+        for t in _next_targets(compiled, name, gs.state.values):
             if t != END and t not in next_frontier:
                 next_frontier.append(t)
 

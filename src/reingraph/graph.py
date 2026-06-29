@@ -22,6 +22,7 @@ class StateGraph:
         self._edges: dict[str, list[str]] = {}  # source -> [targets](含 START/END 哨兵)
         self._channels = channels  # 传给 make_state(声明各键的合并 reducer)
         self._entry: str | None = None
+        self._conditional: dict = {}  # source -> ConditionalEdge(运行期,不序列化)
 
     def add_node(self, name: str, node: Any) -> "StateGraph":
         """登记节点。智能适配:Agent→AgentNode、async 函数→FunctionNode、已是 Node→直接收。"""
@@ -46,9 +47,15 @@ class StateGraph:
 
     def add_conditional_edges(
         self, source: str, routing_fn: Callable, path_map: dict | None = None
-    ):
-        """条件边(运行期由 routing_fn(state) 决定去向)—— G2 实现。"""
-        raise NotImplementedError("条件边将在 G2 实现")
+    ) -> "StateGraph":
+        """加条件边:运行期由 routing_fn(state_values) 决定去向。
+
+        routing_fn 返回:节点名(分支)/ 节点名列表(扇出 G3)/ END。path_map 可选(便于可视化)。
+        """
+        from reingraph.edges import ConditionalEdge
+
+        self._conditional[source] = ConditionalEdge(source, routing_fn, path_map)
+        return self
 
     def set_entry_point(self, name: str) -> "StateGraph":
         """设入口(等价 add_edge(START, name))。"""
@@ -92,4 +99,5 @@ class StateGraph:
             channels=self._channels,
             config=config or GraphConfig(),
             store=store,
+            conditional=self._conditional,
         )

@@ -27,6 +27,7 @@ class CompiledGraph:
         channels: Any,
         config: GraphConfig,
         store: Any,
+        conditional: dict | None = None,
     ):
         self.nodes = nodes
         self.edges = edges
@@ -34,6 +35,7 @@ class CompiledGraph:
         self.channels = channels
         self.config = config
         self.store = store
+        self.conditional = conditional or {}  # source -> ConditionalEdge(运行期,不序列化)
 
     async def ainvoke(self, inputs: dict[str, Any], *, thread_id: str = "default") -> GraphResult:
         """异步执行一张图:把 inputs 灌进初始状态,从 entry 起跑到 END。"""

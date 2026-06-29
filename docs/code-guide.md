@@ -62,3 +62,20 @@ LangGraph 熟悉的 `add_node/add_edge/set_entry_point` + rein 的 `@graph.node`
 `invoke`(同步)/ `ainvoke`(异步)从入口跑到 END。同步门面照抄 rein:在事件循环里就报错引导用 `ainvoke`(不嵌套 event loop)。
 
 > **G1 成果**:`A→B→END` 流水线跑通,数据在节点间真流转,到 END 自动停,整图可序列化,熔断生效 —— reinGraph 现在能把 rein agent 编排成顺序工作流了。
+
+---
+
+## G2:条件分支 + 循环(让图会拐弯)
+
+让图能"看状态决定下一步"。
+
+### 条件边(`edges.py` + `graph.py` + `engine.py`)
+`add_conditional_edges(source, routing_fn)`:节点跑完后,引擎调 `routing_fn(state)` 得到下一个去向(节点名 / 列表 / END),而不是走固定静态边。routing_fn 是函数、不可序列化,按 source 登记在运行期注册表(同 rein 钩子不进序列化)。引擎的 `_next_targets` 升级:有条件边就调 routing_fn,否则走静态边 —— **顺序图(G1)一行没改照样跑**。
+
+### 循环
+循环不是新机制,就是 routing_fn 返回**上游节点名**(回到自己或前面),引擎把它加回 frontier。reflexion(生成→评估→不满意回去重生成)就这么表达。
+
+### 防失控
+`max_node_visits`(单节点访问上限)+ `max_supersteps`(总超步上限)双闸兜底 —— 熔断纯函数 G1 已备好,G2 直接生效。
+
+> **G2 成果**:图能条件分支、能带上限循环。配合 G1,reinGraph 已能表达"路由 + 反思"这类动态工作流。
