@@ -5,6 +5,8 @@
 ## [Unreleased]
 
 ### Added
+- **图级结构化日志**:`reingraph.log`(`enable_logging`,默认安静 NullHandler、一行开启,顺带开底层 rein 日志);engine 在熔断/中断/完成处埋点,带 `thread_id` 作 trace、脱敏不记 state/prompt。
+- **CI badge** 加到 README。
 - **节点异常处理(生产加固)**:节点抛异常 → 转「错误中断」(`gather(return_exceptions=True)`,不炸整图、同超步成功节点进度保留),`resume(approve=True)` 重试该节点 / `approve=False` 放弃,错误态可序列化存盘。
 
 ### Added(G0–G7 全部完成)

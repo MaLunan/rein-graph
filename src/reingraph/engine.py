@@ -18,6 +18,7 @@ from rein import Interrupt
 
 from reingraph.config import GraphConfig
 from reingraph.edges import END
+from reingraph.log import logger
 from reingraph.result import GraphInterrupt, GraphStep
 from reingraph.session import GraphResult, GraphSession
 from reingraph.state import apply_updates
@@ -161,13 +162,20 @@ async def arun_graph(gs: GraphSession, compiled: Any) -> GraphResult:
     while not gs.done:
         reason = check_graph_circuit(gs, compiled.config, start)
         if reason:
+            logger.warning("[%s] 熔断停止: %s", gs.thread_id, reason)
             gs.done = True
             gs.stop_reason = reason
             break
         gs, steps, interrupt = await superstep(gs, compiled)
         all_steps.extend(steps)
         if interrupt is not None:
+            logger.info(
+                "[%s] 图中断于节点 %s (%s)", gs.thread_id, interrupt.node, interrupt.inner.type
+            )
             return _interrupted_result(gs, all_steps)
+    logger.info(
+        "[%s] 图完成: stop_reason=%s superstep=%d", gs.thread_id, gs.stop_reason, gs.superstep
+    )
     return GraphResult(
         status="done",
         values=gs.state.values,

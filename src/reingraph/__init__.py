@@ -26,6 +26,7 @@ __version__ = "0.1.0"
 from reingraph.config import GraphConfig
 from reingraph.edges import END, START
 from reingraph.graph import StateGraph
+from reingraph.log import enable_logging
 from reingraph.nodes import AgentNode, FunctionNode, Node, NodeResult
 from reingraph.result import GraphInterrupt, GraphStep
 from reingraph.session import GraphResult, GraphSession
@@ -66,6 +67,7 @@ __all__ = [
     "GraphStore",
     "MemoryGraphStore",
     "FileGraphStore",
-    # 流式
+    # 流式 / 日志
     "GraphEvent",
+    "enable_logging",
 ]

@@ -2,6 +2,8 @@
 
 > **把多个 rein agent 编排成有状态的图工作流** —— 条件分支、循环、并行汇合、人在环路(HITL)。
 
+[![test](https://github.com/MaLunan/rein-graph/actions/workflows/test.yml/badge.svg)](https://github.com/MaLunan/rein-graph/actions/workflows/test.yml)
+
 reinGraph 之于 [rein](https://github.com/MaLunan/rein),如同 **LangGraph 之于 LangChain**。
 但根本区别在于 ——【**内核全部复用 rein,而非重造**】:
 
