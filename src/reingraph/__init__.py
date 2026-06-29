@@ -36,6 +36,8 @@ from reingraph.state import (
     make_state,
     register_reducer,
 )
+from reingraph.store import FileGraphStore, GraphStore, MemoryGraphStore
+from reingraph.stream import GraphEvent
 
 __all__ = [
     "__version__",
@@ -60,4 +62,10 @@ __all__ = [
     "GraphResult",
     "GraphInterrupt",
     "GraphStep",
+    # 持久化(复用 rein.SessionStore 形态)
+    "GraphStore",
+    "MemoryGraphStore",
+    "FileGraphStore",
+    # 流式
+    "GraphEvent",
 ]

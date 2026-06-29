@@ -116,3 +116,15 @@ LangGraph 熟悉的 `add_node/add_edge/set_entry_point` + rein 的 `@graph.node`
 `graph.resume(thread_id 或 session, approve=)` → 找到中断节点 → 调它的 `agent.aresume(node_sessions[node])` —— **直接复用 rein 的恢复**。完成则推进图、再中断则多轮审批、拒绝则错误回填让 agent 自愈。
 
 > **G4 成果**:整图(含 agent 会话)一句话存盘、换进程 resume。这是 reinGraph 区别于 LangGraph 的根本 —— **HITL / checkpoint 没写一行新机制,全是把 rein 的单 agent 中断恢复"分发到图层"**。
+
+---
+
+## G5:流式 + 可观测
+
+### 流式(`stream.py` + `engine.astream_graph` + `compiled.astream`)
+`astream` 把图执行变成实时**事件流** `GraphEvent`(超步开始 / 节点开始 / 节点结束 / 状态更新 / 中断 / 完成)。复用 `superstep`,每步发事件,UI 可边跑边显示。中断时发 `interrupt` 事件并停止流。
+
+### 可观测(其实早就内建)
+engine 每步就把节点 `usage` 累加进 `gs.usage`、把节点明细聚合成带归属的 `GraphStep` —— 所以 `GraphResult.usage` 就是**全图总用量**、`steps` 是带"哪个节点 / 哪个超步"标注的完整流水账。各节点 `RunResult` 的 `rein.Step` 还嵌在 `GraphStep.inner_steps` 里,要钻到哪个 agent 的哪一步都行。
+
+> **G5 成果**:图执行可实时流式观察、全图用量 / 轨迹可聚合追踪。

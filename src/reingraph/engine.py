@@ -193,3 +193,39 @@ async def aresume_graph(
     gs.done = False
     gs.stop_reason = None
     return await arun_graph(gs, compiled)  # 继续跑
+
+
+async def astream_graph(gs: GraphSession, compiled: Any):
+    """边推进边 yield GraphEvent(超步级)。逻辑同 arun_graph,只是每步发事件。"""
+    from reingraph.stream import GraphEvent
+
+    start = time.monotonic()
+    while not gs.done:
+        reason = check_graph_circuit(gs, compiled.config, start)
+        if reason:
+            gs.done = True
+            gs.stop_reason = reason
+            break
+        if not gs.frontier:
+            gs.done = True
+            gs.stop_reason = gs.stop_reason or "done"
+            break
+        yield GraphEvent(type="superstep_start", superstep=gs.superstep)
+        for n in gs.frontier:  # 跑前的 frontier = 本超步要跑的节点
+            yield GraphEvent(type="node_start", node=n, superstep=gs.superstep)
+        gs, steps, interrupt = await superstep(gs, compiled)
+        for s in steps:
+            yield GraphEvent(
+                type="node_end",
+                node=s.node,
+                superstep=s.superstep,
+                usage=s.usage,
+                summary=s.summary,
+            )
+        if interrupt is not None:
+            yield GraphEvent(type="interrupt", node=interrupt.node, superstep=gs.superstep)
+            return
+        yield GraphEvent(type="state_update", superstep=gs.superstep, values=dict(gs.state.values))
+    yield GraphEvent(
+        type="done", values=dict(gs.state.values), usage=gs.usage, stop_reason=gs.stop_reason
+    )

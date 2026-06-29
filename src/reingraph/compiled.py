@@ -99,3 +99,12 @@ class CompiledGraph:
         except RuntimeError:
             return asyncio.run(self.aresume(session_or_thread, approve=approve, answer=answer))
         raise RuntimeError("已在事件循环中,请改用 await aresume(...)")
+
+    async def astream(self, inputs: dict[str, Any], *, thread_id: str = "default"):
+        """流式执行:逐个 yield 图级 GraphEvent(超步 / 节点 / 状态 / 中断 / 完成)。"""
+        state = make_state(self.channels, inputs)
+        gs = GraphSession(thread_id=thread_id, state=state, frontier=[self.entry])
+        async for ev in engine.astream_graph(gs, self):
+            yield ev
+        if self.store is not None:
+            self.store.save(thread_id, gs)
